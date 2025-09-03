@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 AI 4K/3D Game Generator - ملف واحد شامل
 - يولّد أكواد لعبة 3D/4K تلقائيًا
