@@ -15,7 +15,8 @@ class ReasoningModel(ABC):
 
     @abstractmethod
     async def reason(self, task: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        pass
+        self.logger.warning("`reason` method is not implemented.")
+        return {}
 
 class MetaCognitiveReasoning(ReasoningModel):
     """Feature 36: Thinking about thinking"""

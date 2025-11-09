@@ -5,18 +5,40 @@ services:
     build: .
     container_name: selfaware-ai-v100
     ports:
-      - "8080:8080" # REST API
-      - "8081:8081" # WebSocket
-      - "8082:8082" # Dashboard
+      - "8080:8080"  # FastAPI
+      - "8081:8081"  # WebSocket
+      - "8082:8082"  # Streamlit Dashboard
     volumes:
+      - ./:/app
       - ./data:/app/data
       - ./logs:/app/logs
       - ./backups:/app/backups
-      - ./config:/app/config
+      - ./models:/app/models
     environment:
       - SYSTEM_MODE=production
       - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379
+      - WEAVIATE_URL=http://weaviate:8080
+      - QDRANT_URL=http://qdrant:6333
+      - PROMETHEUS_URL=http://prometheus:9090
+      - SENTRY_DSN=${SENTRY_DSN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - redis
+      - weaviate
+      - qdrant
+      - prometheus
+      - grafana
+    networks:
+      - ai-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   redis:
     image: redis:7-alpine
@@ -25,6 +47,164 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  weaviate:
+    image: semitechnologies/weaviate:1.22.5
+    container_name: selfaware-weaviate
+    ports:
+      - "8083:8080"
+    environment:
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - ENABLE_MODULES=text2vec-openai,generative-openai
+      - OPENAI_APIKEY=${OPENAI_API_KEY}
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.6.1
+    container_name: selfaware-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: selfaware-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: selfaware-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    container_name: selfaware-celery
+    command: celery -A src.celery_app worker --loglevel=info
+    volumes:
+      - ./:/app
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  celery-beat:
+    build: .
+    container_name: selfaware-celery-beat
+    command: celery -A src.celery_app beat --loglevel=info
+    volumes:
+      - ./:/app
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.8.1
+    container_name: selfaware-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlflow:/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: selfaware-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - selfaware-ai
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: selfaware-node-exporter
+    ports:
+      - "9100:9100"
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  celery-exporter:
+    image: oliver006/celery_exporter:v0.7.3
+    container_name: selfaware-celery-exporter
+    ports:
+      - "9540:9540"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.56.0
+    container_name: selfaware-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    networks:
+      - ai-network
+    restart: unless-stopped
 
 volumes:
   redis_data:
+  weaviate_data:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  mlflow_data:
+
+networks:
+  ai-network:
+    driver: bridge
