@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  selfaware-ai:
+    build: .
+    container_name: selfaware-ai-v100
+    ports:
+      - "8080:8080" # REST API
+      - "8081:8081" # WebSocket
+      - "8082:8082" # Dashboard
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./config:/app/config
+    environment:
+      - SYSTEM_MODE=production
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: selfaware-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
