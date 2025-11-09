@@ -1,76 +1,44 @@
-.PHONY: help setup install run test clean build docker
+# AI Tools
+ai-generate: ## Generate text with LLM
+	@curl -X POST http://localhost:8080/api/ai/generate \
+		-H "Content-Type: application/json" \
+		-d '{"prompt": "$(PROMPT)", "provider": "$(PROVIDER)"}'
 
-SYSTEM_NAME := selfaware-ai-v100
-PYTHON := python3
-PIP := pip3
-DOCKER := docker
+ai-embed: ## Embed text
+	@curl -X POST http://localhost:8080/api/ai/embed \
+		-H "Content-Type: application/json" \
+		-d '{"text": "$(TEXT)", "provider": "$(PROVIDER)"}'
 
-help: ## Show this help message
-	@echo "Self-Aware AI System v100 - Commands"
-	@echo "===================================="
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+vector-store: ## Store document in vector DB
+	@curl -X POST http://localhost:8080/api/vector/store \
+		-H "Content-Type: application/json" \
+		-d '{"content": "$(CONTENT)", "metadata": {"source": "cli"}}'
 
-setup: ## Setup complete system
-	@echo "🚀 Setting up Self-Aware AI System v100..."
-	$(PIP) install -r requirements.txt
-	mkdir -p data logs backups snapshots visualizations
-	python config.py --create-configs
-	@echo "✅ Setup complete!"
+vector-search: ## Search vector DB
+	@curl -X POST http://localhost:8080/api/vector/search \
+		-H "Content-Type: application/json" \
+		-d '{"query": "$(QUERY)", "limit": $(LIMIT)}'
 
-install: setup ## Install system
+# Workflow
+start-celery: ## Start Celery worker
+	@celery -A src.celery_app worker --loglevel=info --concurrency=4
 
-run: ## Run the system
-	@echo "🚀 Starting Self-Aware AI System..."
-	$(PYTHON) main.py
+start-celery-beat: ## Start Celery beat
+	@celery -A src.celery_app beat --loglevel=info
 
-test: ## Run tests
-	@echo "🧪 Running tests..."
-	pytest tests/ -v --cov=.
+# Monitoring
+start-prometheus: ## Start Prometheus
+	@docker-compose up -d prometheus
 
-clean: ## Clean logs and temp files
-	@echo "🧹 Cleaning..."
-	rm -rf logs/*.log
-	rm -rf data/*.db
-	rm -rf __pycache__ **/__pycache__
+start-grafana: ## Start Grafana
+	@docker-compose up -d grafana
 
-build: ## Build Docker image
-	@echo "📦 Building Docker image..."
-	$(DOCKER) build -t $(SYSTEM_NAME):latest .
+# Documentation
+docs-serve: ## Serve MkDocs
+	@mkdocs serve --dev-addr 0.0.0.0:8084
 
-docker-run: build ## Run in Docker
-	@echo "🐳 Running in Docker..."
-	$(DOCKER) run -d \
-		-p 8080:8080 -p 8081:8081 \
-		-v $(PWD)/data:/app/data \
-		-v $(PWD)/logs:/app/logs \
-		--name $(SYSTEM_NAME) \
-		$(SYSTEM_NAME):latest
-
-stop: ## Stop system
-	@echo "🛑 Stopping system..."
-	pkill -f "python main.py" || true
-	$(DOCKER) stop $(SYSTEM_NAME) || true
-
-emergency-test: ## Simulate emergency (Feature 1)
-	$(PYTHON) -c "import asyncio; from main import SelfAwareAISystem; s=SelfAwareAISystem(); asyncio.run(s.simulate_emergency())"
-
-benchmark: ## Run benchmark (Feature 2)
-	$(PYTHON) -c "import asyncio; from main import SelfAwareAISystem; s=SelfAwareAISystem(); print(asyncio.run(s.benchmark_consciousness()))"
-
-list-features: ## List all features
-	python config.py --list-features
-
-enable-feature: ## Enable feature (usage: make enable-feature FEATURE=name)
-	python config.py --enable $(FEATURE)
-
-disable-feature: ## Disable feature (usage: make disable-feature FEATURE=name)
-	python config.py --disable $(FEATURE)
-
-dev-server: ## Development server
-	uvicorn main:app --reload --port 8080 --log-level info
-
-monitor: ## Start monitoring dashboard
-	open monitoring_dashboard.html
-	python -m http.server 8083
-
-all: setup run ## Full setup and run
+# Security
+security-scan: ## Run full security scan
+	@bandit -r src/ -f json -o reports/security/bandit.json
+	@safety check --json -o reports/security/safety.json
+	@trivy fs --format json -o reports/security/trivy.json .
